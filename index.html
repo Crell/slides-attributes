@@ -52,7 +52,143 @@
 
     <section>
       <section>
+        <h2>What is Metadata?</h2>
+      </section>
+      <section>
+        // Facebook logo with X over it.
+        <aside class="notes">
+          <ul>
+            <li>We do not mean data Facebook has on you that it sells to the highest bidder</li>
+          </ul>
+        </aside>
+      </section>
+      <section>
         <h2>Metadata</h2>
+        <div class="layout-stacked">
+          <div>
+            <blockquote>data that provides information<br />about other data</blockquote>
+            <cite><a href="https://en.wikipedia.org/wiki/Metadata">Wikipedia</a></cite>
+          </div>
+          <div>
+            <p class="fragment bigtext">Information about code that is not executable</p>
+          </div>
+        </div>
+        <aside class="notes">
+          <ul>
+            <li>Many forms of metdata for many purposes</li>
+          </ul>
+        </aside>
+      </section>
+      <section>
+        <h2>Historical metadata</h2>
+        <pre><code class="php font--16" data-trim data-noescape data-line-numbers="|4,13-17|18-22|5-6|8-11|1-3">
+          /**
+           * @Command(name="product:create")
+           */
+          class CreateProductCommand implements Command {
+              // Externally mutable, which is not good.
+              public static string $name = 'product:create';
+
+              // More verbose, but more flexible if some logic is needed.
+              public static function name(): string {
+                  return "product:create";
+              }
+
+              public function run(): void {
+                // ...
+              }
+          }
+
+          // Could be far from the actual code
+          // Possibly YAML/XML file that translates to this.
+          function register_commands(CommandList $commands) {
+              $commands->add('product:create', CreateProductCommand::class);
+          }
+        </code></pre>
+        <aside class="notes">
+          <ul>
+            <li>How do you define a new Command?</li>
+            <li>External registration</li>
+            <li>Self-declare via static properties (very Laravel)</li>
+            <li>Self-declare via static methods</li>
+            <li>Self-declare with annotations (very Symfony)</li>
+            <li>All self-declares have a "go find it" step.</li>
+          </ul>
+        </aside>
+      </section>
+      <section>
+        <h2>Doctrine Annotations</h2>
+        <ul>
+          <li>Split off from Doctrine ORM, Jan 2009</li>
+          <li class="fragment">Split off to its own package Jan 2013</li>
+          <li class="fragment">Parser for docblocks</li>
+          <li class="fragment">Maps <code>@-tags</code> to class properties</li>
+          <li class="fragment">Works on class, method, function, most things</li>
+        </ul>
+        <aside class="notes">
+          <ul>
+            <li>Oldest code seems to date to 2006, PHP 5.1 era</li>
+          </ul>
+        </aside>
+      </section>
+      <section>
+        <h2>Annotations example</h2>
+        <pre><code class="php font--16" data-trim data-noescape data-line-numbers>
+          /**
+           * @Annotation
+           */
+          final class Command {
+              public $name;
+          }
+
+          /**
+           * @Command(name="product:create")
+           */
+          class CreateProductCommand implements Command {
+              public function run(): void {
+                // ...
+              }
+          }
+        </code></pre>
+        <pre class="fragment"><code class="php font--16" data-trim data-noescape data-line-numbers>
+          // Load through reflection
+          $reflectionClass = new ReflectionClass(CreateProductCommand::class);
+
+          $reader = new AnnotationReader();
+          $annotation = $reader->getClassAnnotation(
+              $reflectionClass,
+              Command::class
+          );
+          print $annotation->name; // "product:create"
+        </code></pre>
+      </section>
+      <section>
+        <h2>Downsides</h2>
+        <ul>
+          <li>Eeew, code in docblocks</li>
+          <li class="fragment">Requires extra library</li>
+          <li class="fragment">Very hard to lint</li>
+          <li class="fragment">Mediocre IDE autocompletion</li>
+          <li class="fragment">Confusing with docblock tags generally</li>
+        </ul>
+      </section>
+    </section>
+    <section>
+      <section>
+        <h3>Enter attributes</h3>
+        <ul>
+          <li>2020: Covid is ravaging the world...</li>
+          <li class="fragment">Basically port Annotations to core</li>
+          <li class="fragment">Different name to avoid confusion</li>
+          <li class="fragment">Coincided with named args and constructor promotion</li>
+        </ul>
+        <aside class="notes">
+          <ul>
+            <li>Developers stuck at home, may as well make new cool features!</li>
+            <li>Went through several syntax iterations, skipping the drama</li>
+            <li>Eventual syntax was BC with older versions!</li>
+          </ul>
+        </aside>
       </section>
     </section>
 
