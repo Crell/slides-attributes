@@ -81,7 +81,7 @@
       </section>
       <section>
         <h2>Historical metadata</h2>
-        <pre><code class="php font--16" data-trim data-noescape data-line-numbers="|4,13-17|18-22|5-6|8-11|1-3">
+        <pre><code class="php font--16" data-trim data-noescape data-line-numbers="4,13-16|18-22|5-6|8-11|1-3">
           /**
            * @Command(name="product:create")
            */
@@ -125,6 +125,7 @@
           <li class="fragment">Maps <code>@-tags</code> to class properties</li>
           <li class="fragment">Works on class, method, function, most things</li>
         </ul>
+        <p>cf: <a href="https://www.doctrine-project.org/2022/11/04/annotations-to-attributes.html">https://www.doctrine-project.org/2022/11/04/annotations-to-attributes.html</a></p>
         <aside class="notes">
           <ul>
             <li>Oldest code seems to date to 2006, PHP 5.1 era</li>
@@ -165,19 +166,25 @@
       <section>
         <h2>Downsides</h2>
         <ul>
-          <li>Eeew, code in docblocks</li>
+          <li class="fragment">Eeew, code in docblocks</li>
           <li class="fragment">Requires extra library</li>
           <li class="fragment">Very hard to lint</li>
           <li class="fragment">Mediocre IDE autocompletion</li>
           <li class="fragment">Confusing with docblock tags generally</li>
         </ul>
+        <aside class="notes">
+          <ul>
+            <li>Still very popular</li>
+            <li>Used by Symfony, Doctrine, etc.</li>
+          </ul>
+        </aside>
       </section>
     </section>
     <section>
       <section>
-        <h3>Enter attributes</h3>
+        <h3>Enter Attributes</h3>
         <ul>
-          <li>2020: Covid is ravaging the world...</li>
+          <li class="fragment">2020: Covid is ravaging the world...</li>
           <li class="fragment">Basically port Annotations to core</li>
           <li class="fragment">Different name to avoid confusion</li>
           <li class="fragment">Coincided with named args and constructor promotion</li>
@@ -187,6 +194,165 @@
             <li>Developers stuck at home, may as well make new cool features!</li>
             <li>Went through several syntax iterations, skipping the drama</li>
             <li>Eventual syntax was BC with older versions!</li>
+            <li>Second attempt.  Previous attempt in 2010 was rejected.</li>
+          </ul>
+        </aside>
+      </section>
+      <section>
+        <h2>Attributes example</h2>
+        <pre><code class="php font--16" data-trim data-noescape data-line-numbers>
+          #[\Attribute]
+          final class Command {
+              public function __construct(public string $name) {}
+          }
+
+          #[Command(name: 'product:create')]
+          class CreateProductCommand implements Command {
+              public function run(): void {
+                // ...
+              }
+          }
+        </code></pre>
+        <pre class="fragment"><code class="php font--16" data-trim data-noescape data-line-numbers>
+          // Load through reflection
+          $rClass = new ReflectionClass(CreateProductCommand::class);
+
+          $attribs = $rClass->getAttributes(Command::class, \ReflectionAttribute::IS_INSTANCEOF);
+          $cmd = $attribs[0]->getInstance();
+
+          print $cmd->name; // "product:create"
+        </code></pre>
+        <aside class="notes">
+          <ul>
+            <li>Now uses constructor, not public properties</li>
+            <li>Constructor promotion and named args dovetail beautifully</li>
+            <li>Arguments may be any constant value (including enums, other objects, etc.)</li>
+          </ul>
+        </aside>
+      </section>
+      <section>
+        <h3>Basic Reflection API</h3>
+        <pre><code class="php font--16" data-trim data-noescape data-line-numbers>
+          $rClass = new ReflectionClass(CreateProductCommand::class);
+
+          // Get all attributes as raw data.
+          /** @var \ReflectionAttribute[] */
+          $attribs = $rClass->getAttributes(Command::class);
+
+          var_dump($attribs[0]->getName());
+          var_dump($attribs[0]->getArguments());
+          var_dump($attribs[0]->getTarget());
+          var_dump($attribs[0]->isRepeated());
+
+          var_dump($attribs[0]->getInstance());
+        </code></pre>
+        <pre><code class="bash font--14" data-trim data-noescape data-line-numbers>
+          string(7) "Command"
+
+          array(1) {
+            ["name"]=>
+            string(14) "product:create"
+          }
+
+          int(1)
+
+          bool(false)
+
+          object(Command)#3 (1) {
+            ["name"]=>
+            string(14) "product:create"
+          }
+        </code></pre>
+        <aside class="notes">
+          <ul>
+            <li>Don't need a class! Can use raw data</li>
+            <li>Nobody does, AFAIK</li>
+            <li>Exact match by default; pass arg to getAttributes() to do instanceof</li>
+            <li>instanceof allows subclass attributes, interfaces, etc.</li>
+          </ul>
+        </aside>
+      </section>
+      <section>
+        <h3>Declaring attributes</h3>
+        <pre><code class="php font--16" data-trim data-noescape data-line-numbers>
+          #[\Attribute(\Attribute::TARGET_CLASS | \Attribute::IS_REPEATABLE)]
+          class OnClass {}
+
+          #[\Attribute(\Attribute::TARGET_CLASS | \Attribute::TARGET_METHOD)]
+          class OnClassOrMethod {}
+        </code></pre>
+        <pre class="fragment"><code class="php font--16" data-trim data-noescape data-line-numbers>
+          #[Foo]
+          #[Bar('baz')]
+          class Demo {
+              #[Beep]
+              private Foo $foo;
+
+              public function __construct(
+                  #[Load(context: 'foo', bar: true)]
+                  private readonly FooService $fooService,
+
+                  #[LoadProxy(context: 'bar')]
+                  private readonly BarService $barService,
+              ) {}
+
+              /**
+               * Sets the foo.
+               */
+              #[Poink('narf'), Narf('poink')]
+              public function setFoo(#[Beep] Foo $new): void
+              {
+                // ...
+              }
+          }
+        </code></pre>
+        <aside class="notes">
+          <ul>
+            <li>Can target class, method, function, parameter, or class constant</li>
+            <li>Unique on a target by default, opt-in to multi-value</li>
+            <li>getTarget() returns bitmask of target constants</li>
+            <li>Can use multiple attributes in one attribute block, or multiple blocks</li>
+          </ul>
+        </aside>
+      </section>
+      <section>
+        <h3>Even core uses it</h3>
+        <ul>
+          <li class="fragment"><code>#[SensitiveParameter]</code> - Hides parameter from backtrace (Eg, passwords.)</li>
+          <li class="fragment"><code>#[ReturnTypeWillChange]</code> - Ignore return type mismatch. (Mostly for internal.)</li>
+          <li class="fragment"><code>#[AllowDynamicProperties]</code> - What it says. (8.2+)</li>
+          <li class="fragment"><code>#[Override]</code> - Error if there is no parent method. (8.3+)</li>
+        </ul>
+        <aside class="notes">
+          <ul>
+            <li>ReturnTypeWillChange should really be used only for internal interfaces that got types; ArrayAccess, Countable, etc.</li>
+            <li>Undeclared dynamic properties are opt-in from 9.0! Deprecated now.</li>
+            <li>Override is an edge case, I see no use for it...</li>
+          </ul>
+        </aside>
+      </section>
+      <section>
+        <h3>Limitations</h3>
+        <ul>
+          <li class="fragment">Reflection API is very limited</li>
+          <li class="fragment">Attribute doesn't know where it came from</li>
+          <li class="fragment">No inheritance</li>
+          <li class="fragment">No default attribute handling</li>
+          <li class="fragment">No context-variation</li>
+        </ul>
+        <aside class="notes">
+          <ul>
+            <li>Doesn't look at parent class for attributes, must be lexically in the class</li>
+            <li>Context-variation: Define different attributes for different scenarios</li>
+            <li></li>
+          </ul>
+        </aside>
+      </section>
+      <section>
+        Image: Moar
+        <aside class="notes">
+          <ul>
+            <li>I wanted more power...</li>
           </ul>
         </aside>
       </section>
@@ -197,7 +363,7 @@
         * Not data from Facebook
       * PHP annotations history
       * PHP attributes design (recognize but skip syntax drama)
-        * Built-in attributes (SensitiveParameter, ReturnTypeWillChange, AllowDynamicProperties)
+        * Built-in attributes (SensitiveParameter, ReturnTypeWillChange, AllowDynamicProperties, Override)
         * Reflection API is awful in general
       * I wanted Moar! (Mention TYPO3, Serde)
         * Limitations of Attributes
