@@ -335,15 +335,16 @@
         <h3>Limitations</h3>
         <ul>
           <li class="fragment">Reflection API is very limited</li>
-          <li class="fragment">Attribute doesn't know where it came from</li>
+          <li class="fragment">No access to the structure the attribute was on</li>
           <li class="fragment">No inheritance</li>
-          <li class="fragment">No default attribute handling</li>
-          <li class="fragment">No context-variation</li>
+          <li class="fragment">No way to group related attributes</li>
+          <li class="fragment">No built-in default handling</li>
+          <li class="fragment">Attributes cannot be contextual</li>
         </ul>
         <aside class="notes">
           <ul>
             <li>Doesn't look at parent class for attributes, must be lexically in the class</li>
-            <li>Context-variation: Define different attributes for different scenarios</li>
+            <li>Contextual: Define different attributes for different scenarios</li>
             <li></li>
           </ul>
         </aside>
@@ -353,6 +354,75 @@
         <aside class="notes">
           <ul>
             <li>I wanted more power...</li>
+          </ul>
+        </aside>
+      </section>
+    </section>
+    <section>
+      <section>
+        <h2>Story time</h2>
+        <p><img src="assets/typo3.svg" alt="TYPO3" style="width: 400px"></p>
+        <p class="fragment"><q>Don't solve a problem, build a tool to solve the problem, then use it.</q></p>
+        <aside class="notes">
+          <ul>
+            <li>In 2021, worked at TYPO3</li>
+            <li>Lots of experimental projects</li>
+            <li>Experiment with new ORM</li>
+            <li>Build new Serializer, became Crell/Serde</li>
+            <li>These all needed attributes!</li>
+          </ul>
+        </aside>
+      </section>
+      <section>
+        <h2>Three libraries</h2>
+        <ul>
+          <li><a href="http://github.com/Crell/fp">Crell/fp</a></li>
+          <li><a href="http://github.com/Crell/AttributeUtils">Crell/AttributeUtils</a></li>
+          <li><a href="http://github.com/Crell/Serde">Crell/Serde</a></li>
+        </ul>
+        <aside class="notes">
+          <ul>
+            <li>Won't talk about fp</li>
+            <li>Only mention Serde as example</li>
+            <li>All built to assume PHP 8.1, started work in the betas</li>
+            <li>TYPO3 ended up not using any, but yay Open Source!</li>
+          </ul>
+        </aside>
+      </section>
+      <section>
+        <h3>AttributeUtils</h3>
+        <ul>
+          <li class="fragment">Driven entirely by interfaces</li>
+          <li class="fragment">All enhancements are opt-in</li>
+          <li class="fragment">Only analyze function or class, but class can scan-down</li>
+          <li class="fragment">Cache friendly!</li>
+        </ul>
+      </section>
+      <section>
+        <h3>FromReflection</h3>
+        <pre><code class="php font--16" data-trim data-noescape data-line-numbers>
+          #[\Attribute(\Attribute::TARGET_CLASS)]
+          class Widget implements FromReflectionClass {
+              public readonly string $name;
+
+              public function fromReflection(\ReflectionClass $subject): void {
+                  $this->name ??= $subject->getShortName();
+              }
+          }
+
+          #[Widget]
+          class Something { ... }
+        </code></pre>
+        <pre><code class="php font--16" data-trim data-noescape data-line-numbers>
+          $analyzer = new \Crell\AttributeUtils\ClassAnalyzer();
+          // Analyze Something with respect to Widget
+          $def = $analyzer->analyze(Something::class, Widget::class);
+
+          $def->name; // "Something"
+        </code></pre>
+        <aside class="notes">
+          <ul>
+            <li></li>
           </ul>
         </aside>
       </section>
