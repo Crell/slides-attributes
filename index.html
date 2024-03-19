@@ -119,11 +119,11 @@
       <section>
         <h2>Doctrine Annotations</h2>
         <ul>
-          <li>Split off from Doctrine ORM, Jan 2009</li>
+          <li class="fragment">Split off from Doctrine ORM, Jan 2009</li>
           <li class="fragment">Split off to its own package Jan 2013</li>
           <li class="fragment">Parser for docblocks</li>
           <li class="fragment">Maps <code>@-tags</code> to class properties</li>
-          <li class="fragment">Works on class, method, function, most things</li>
+          <li class="fragment">Works on class, method, or function</li>
         </ul>
         <p>cf: <a href="https://www.doctrine-project.org/2022/11/04/annotations-to-attributes.html">https://www.doctrine-project.org/2022/11/04/annotations-to-attributes.html</a></p>
         <aside class="notes">
@@ -217,7 +217,8 @@
           // Load through reflection
           $rClass = new ReflectionClass(CreateProductCommand::class);
 
-          $attribs = $rClass->getAttributes(Command::class, \ReflectionAttribute::IS_INSTANCEOF);
+          $attribs = $rClass
+              ->getAttributes(Command::class, \ReflectionAttribute::IS_INSTANCEOF);
           $cmd = $attribs[0]->getInstance();
 
           print $cmd->name; // "product:create"
@@ -226,6 +227,7 @@
           <ul>
             <li>Now uses constructor, not public properties</li>
             <li>Constructor promotion and named args dovetail beautifully</li>
+            <li>Also can use readonly now in 8.1+</li>
             <li>Arguments may be any constant value (including enums, other objects, etc.)</li>
           </ul>
         </aside>
@@ -345,7 +347,6 @@
           <ul>
             <li>Doesn't look at parent class for attributes, must be lexically in the class</li>
             <li>Contextual: Define different attributes for different scenarios</li>
-            <li></li>
           </ul>
         </aside>
       </section>
@@ -399,7 +400,7 @@
         </ul>
       </section>
       <section>
-        <h3>FromReflection</h3>
+        <h3><code>FromReflection*</code></h3>
         <pre><code class="php font--16" data-trim data-noescape data-line-numbers>
           #[\Attribute(\Attribute::TARGET_CLASS)]
           class Widget implements FromReflectionClass {
@@ -411,18 +412,101 @@
           }
 
           #[Widget]
-          class Something { ... }
+          class Dohicky { ... }
         </code></pre>
         <pre><code class="php font--16" data-trim data-noescape data-line-numbers>
           $analyzer = new \Crell\AttributeUtils\ClassAnalyzer();
-          // Analyze Something with respect to Widget
-          $def = $analyzer->analyze(Something::class, Widget::class);
+          // Analyze Dohicky with respect to Widget
+          $def = $analyzer->analyze(Dohicky::class, Widget::class);
 
-          $def->name; // "Something"
+          $def->name; // "Dohicky"
+        </code></pre>
+        <p class="fragment">Also <code>FromReflectionMethod</code>, <code>FromReflectionFunction</code>, <code>FromReflectionProperty</code>, <code>FromReflectionParameter</code>, <code>FromReflectionClassConstant</code></p>
+        <aside class="notes">
+          <ul>
+            <li>Save whatever you want from reflection object, but not the reflection object!</li>
+            <li>Cannot serialize reflection object.</li>
+            <li>Note: Public readonly props.  Optional, recommended.</li>
+            <li>Can not use any interfaces at all. Then is the same as core reflection.</li>
+          </ul>
+        </aside>
+      </section>
+      <section>
+        <h2><code>ParseProperties</code></h2>
+        <pre><code class="php font--16" data-trim data-noescape data-line-numbers="|2,5-7|10-15">
+          #[\Attribute(\Attribute::TARGET_CLASS)]
+          class Data implements ParseProperties {
+              public readonly array $props;
+
+              public function propertyAttribute(): string { return MyProperty::class; }
+              public function includePropertiesByDefault(): bool { return true; }
+              public function setProperties(array $ps): void { $this->props = $ps; }
+          }
+
+          #[\Attribute(\Attribute::TARGET_PROPERTY)]
+          class MyProperty {
+              public function __construct(
+                  public readonly string $column = '',
+              ) {}
+          }
+        </code></pre>
+        <pre><code class="php font--16" data-trim data-noescape data-line-numbers>
+          #[Data]
+          class Record {
+              #[MyProperty(column: 'beep')]
+              protected property $foo;
+
+              private property $bar;
+          }
+          $dataAttrib = $analyzer->analyze(Record::class, Data::class);
+
+          // $dataAttrib instanceof Data
+          // $dataAttrib->props is ['foo' => MyProperty('beep'), 'bar' => MyProperty('')]
         </code></pre>
         <aside class="notes">
           <ul>
-            <li></li>
+            <li>propertyAttribute: "Look for this attribute on properties"</li>
+            <li>includeByDefault: If a prop has no attribute, make one with empty constructor call</li>
+            <li>setProperties: Gets an array of MyProperty objects.</li>
+            <li>$dataAttrib is an instance of Data, with a 2 element array of MyProperty</li>
+            <li>Want to do something other than store prop array? OK!</li>
+          </ul>
+        </aside>
+      </section>
+      <section>
+        <h2><code>Parse*</code></h2>
+        <pre><code class="php font--16" data-trim data-noescape data-line-numbers="|2|4-5,20-21|7-8,18-19|10-11,22-23|13-14,23">
+          #[\Attribute(\Attribute::TARGET_CLASS)]
+          class MyClass implements ParseProperties, ParseMethods, ParseClassConstants {}
+
+          #[\Attribute(\Attribute::TARGET_PROPERTY)]
+          class MyProperty {}
+
+          #[\Attribute(\Attribute::TARGET_CLASS_CONSTANT)]
+          class MyConstant {}
+
+          #[\Attribute(\Attribute::TARGET_METHOD)]
+          class MyMethod implements ParseParameters {}
+
+          #[\Attribute(\Attribute::TARGET_PARAMETER)]
+          class MyParam {}
+
+          #[MyClass]
+          class Record {
+              #[MyConstant]
+              public const AConstant = 'value';
+              #[MyProperty]
+              protected property $foo;
+              #[MyMethod]
+              public function run(#[MyParam] string $key): string { ... }
+          }
+        </code></pre>
+        <aside class="notes">
+          <ul>
+            <li>All Parse* interfaces have similar methods.</li>
+            <li>Opt-in to any of them.</li>
+            <li>Note parameters are parsed onto method attribute.</li>
+            <li>All could also implement FromReflection* if desired</li>
           </ul>
         </aside>
       </section>
