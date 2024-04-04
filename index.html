@@ -123,7 +123,7 @@
           <li class="fragment">Split off to its own package Jan 2013</li>
           <li class="fragment">Parser for docblocks</li>
           <li class="fragment">Maps <code>@-tags</code> to class properties</li>
-          <li class="fragment">Works on class, method, or function</li>
+          <li class="fragment">Works on class, property, method, or function</li>
         </ul>
         <p>cf: <a href="https://www.doctrine-project.org/2022/11/04/annotations-to-attributes.html">https://www.doctrine-project.org/2022/11/04/annotations-to-attributes.html</a></p>
         <aside class="notes">
@@ -162,6 +162,12 @@
           );
           print $annotation->name; // "product:create"
         </code></pre>
+        <aside class="notes">
+          <ul>
+            <li>PHP engine parses Docblock as string, available in reflection.</li>
+            <li>Parsing docblock string into data is your problem.</li>
+          </ul>
+        </aside>
       </section>
       <section>
         <h2>Downsides</h2>
@@ -390,12 +396,15 @@
           </ul>
         </aside>
       </section>
+    </section>
+    <section>
       <section>
         <h3>AttributeUtils</h3>
         <ul>
           <li class="fragment">Driven entirely by interfaces</li>
           <li class="fragment">All enhancements are opt-in</li>
           <li class="fragment">Only analyze function or class, but class can scan-down</li>
+          <li class="fragment">Accepts class, anon class, object, function, or closure</li>
           <li class="fragment">Cache friendly!</li>
         </ul>
       </section>
@@ -477,7 +486,8 @@
         <h2><code>Parse*</code></h2>
         <pre><code class="php font--16" data-trim data-noescape data-line-numbers="|2|4-5,20-21|7-8,18-19|10-11,22-23|13-14,23">
           #[\Attribute(\Attribute::TARGET_CLASS)]
-          class MyClass implements ParseProperties, ParseMethods, ParseClassConstants {}
+          class MyClass implements ParseProperties, ParseStaticProperites,
+              ParseMethods, ParseStaticMethods, ParseClassConstants {}
 
           #[\Attribute(\Attribute::TARGET_PROPERTY)]
           class MyProperty {}
@@ -496,7 +506,7 @@
               #[MyConstant]
               public const AConstant = 'value';
               #[MyProperty]
-              protected property $foo;
+              protected string $foo;
               #[MyMethod]
               public function run(#[MyParam] string $key): string { ... }
           }
@@ -510,6 +520,604 @@
           </ul>
         </aside>
       </section>
+      <section>
+        <h2><code>ReadsClass</code></h2>
+        <p>For handling defaults</p>
+        <pre><code class="php font--16" data-trim data-noescape data-line-numbers="|1-5|8-9,11-13,17|8,14-16|19-25">
+          #[\Attribute(\Attribute::TARGET_CLASS)]
+          class MyClass implements ParseProperties {
+              public function __construct(public readonly ?string $color = 'blue') {}
+              // ...
+          }
+
+          #[\Attribute(\Attribute::TARGET_PROPERTY)]
+          class MyProperty implements ReadsClass {
+              public readonly string $color;
+
+              public function __construct(?string $color = null) {
+                if ($color) $this->color = $color;
+              }
+              public function fromClassAttribute(MyClass $classDef): void {
+                  $this->color ??= $classDef->color;
+              }
+          }
+
+          #[MyClass(color: 'green')]
+          class Record {
+              #[MyProperty]                // Will be green.
+              protected string $first;
+              #[MyProperty(color: 'blue')] // Will be blue.
+              protected string $first;
+          }
+        </code></pre>
+        <aside class="notes">
+          <ul>
+            <li>Great for setting defaults</li>
+            <li>Be careful with readonly properties! Can only set once.</li>
+            <li>(This is why we need asymmetric visibility.)</li>
+          </ul>
+        </aside>
+      </section>
+      <section>
+        <h3>Inheritance is opt-in</h3>
+        <pre><code class="php font--16" data-trim data-noescape data-line-numbers>
+          #[\Attribute(\Attribute::TARGET_CLASS)]
+          class Person implements Inheritable {
+              public function __construct(public string $name = '') {}
+          }
+
+          #[Person(name: 'Jorge')]
+          class A {}
+          class B extends A {}
+
+          $attrib = $analyzer->analyze(B::class, Person::class);
+          print $attrib->name . PHP_EOL; // prints Jorge
+        </code></pre>
+        <div class="fragment">
+          <pre><code class="php font--16" data-trim data-noescape data-line-numbers>
+            #[\Attribute(\Attribute::TARGET_CLASS)]
+            class Manager extends Person {
+                public function __construct(string $name = '', public string $dept) {
+                  parent::_construct($name);
+                }
+            }
+
+            #[Manager(name: 'Jorge', dept: 'Accounting')]
+            class A {}
+
+            $attrib = $analyzer->analyze(A::class, Person::class);
+            print $attrib->name . PHP_EOL; // prints Jorge
+            print $attrib->dept . PHP_EOL; // prints Accounting
+        </code></pre>
+          <p>Analyzer does <code>instanceof</code>, so child attributes work, too</p>
+        </div>
+        <aside class="notes">
+          <ul>
+            <li>Simple marker interface</li>
+            <li>If you need it, you need it.  If not, you don't.</li>
+            <li>Likely more useful for class and methods than properties</li>
+          </ul>
+        </aside>
+      </section>
+      <section>
+        <h2>Sub-attributes</h2>
+        <pre><code class="php font--20" data-trim data-noescape data-line-numbers="|2-5,14|16-19|2,7-8,11-14">
+          #[\Attribute(\Attribute::TARGET_CLASS)]
+          readonly class Person implements HasSubAttributes {
+              public int $age;
+
+              public function __construct(public string name = 'none') {}
+
+              public function subAttributes(): array {
+                  return [Age::class => 'fromAge'];
+              }
+
+              public function fromAge(?Age $sub): void {
+                  // Can also store the sub-attribute if you prefer.
+                  $this->age = $sub?->age ?? 0;
+              }
+          }
+
+          #[\Attribute(\Attribute::TARGET_CLASS)]
+          readonly class Age {
+              public function __construct(public int $age = 0) {}
+          }
+        </code></pre>
+      </section>
+      <section>
+        <h2>Sub-attributes</h2>
+        <pre><code class="php font--20" data-trim data-noescape data-line-numbers="|1-5|7-10|12-16">
+          #[Person(name: 'Larry'), Age(21)]
+          class A {}
+
+          $attribA = $analyzer->analyze(A::class, Person::class);
+          print "$attribA->name, $attribA->age\n"; // prints "Larry, 21"
+
+          class B {}
+
+          $attribB = $analyzer->analyze(B::class, Person::class);
+          print "$attribB->name, $attribB->age\n"; // prints "none, 0"
+
+          #[Person(name: 'Larry')]
+          class C {}
+
+          $attribC = $analyzer->analyze(C::class, Person::class);
+          print "$attribC->name, $attribC->age\n"; // prints "Larry, 0"
+        </code></pre>
+        <aside class="notes">
+          <ul>
+            <li>Sub-attribute "absorbed" into main attribute</li>
+            <li>Save the whole attribute or not, your choice</li>
+          </ul>
+        </aside>
+      </section>
+      <section>
+        <h2>Exclusions</h2>
+        <pre><code class="php font--20" data-trim data-noescape data-line-numbers="|2,4,7-9|12-20">
+          #[\Attribute(\Attribute::TARGET_PROPERTY)]
+          class Field implements Excludable {
+              public function __construct(
+                  public readonly bool $exclude = false,
+              ) {}
+
+              public function exclude(): bool {
+                  return $this->exclude;
+              }
+          }
+
+          #[ClassSettings(includeByDefault: true)]
+          class User {
+              public function __construct(
+                  private string $loginName,
+                  private string $displayName,
+                  #[Field(exclude: true), SensitiveParameter]
+                  private string $password,
+              ) {}
+          }
+        </code></pre>
+        <aside class="notes">
+          <ul>
+            <li>Example from Serde, the serializer</li>
+            <li>Only useful on non-class attributes.</li>
+            <li>Only useful when "include by default" is true.</li>
+            <li>Could also make exclusion logic based on anything.</li>
+          </ul>
+        </aside>
+      </section>
+      <section>
+        <h2>Multi-value sub-attributes</h2>
+        <pre><code class="php font--16" data-trim data-noescape data-line-numbers="|1-2,5,17|14-17|3,7-9,11|19-24|14,15">
+          #[\Attribute(\Attribute::TARGET_CLASS)]
+          readonly class Person implements HasSubAttributes {
+              public array $knows;
+
+              public function __construct(public string name = 'none') {}
+
+              public function subAttributes(): array {
+                  return [Knows::class => 'fromKnows'];
+              }
+
+              public function fromKnows(array $knows): void { $this->knows = $knows; }
+          }
+
+          #[\Attribute(\Attribute::TARGET_CLASS | \Attribute::IS_REPEATABLE)]
+          readonly class Knows implements Multivalue {
+              public function __construct(public string $name) {}
+          }
+
+          #[Person(name: 'Larry')]
+          #[Knows('Kai')]
+          #[Knows('Molly')]
+          class A {}
+
+          class B {}
+          </code></pre>
+        <aside class="notes">
+          <ul>
+            <li>Main attribute has optional sub-attribute</li>
+            <li>Sub-attribute is marked Multivalue, so is array, not ?object</li>
+            <li>On Class A, person knows 2 people. On B, knows no one.</li>
+            <li>Need IS_REPEATABLE and Multivalue to not conflict with Scopes</li>
+            <li>Speaking of Scopes...</li>
+          </ul>
+        </aside>
+      </section>
+      <section>
+        <h2>Scopes</h2>
+          <pre><code class="php font--16" data-trim data-noescape data-line-numbers="|1-8|10-13,16,23|11,15,22|14,18-20">
+            #[\Attribute(\Attribute::TARGET_CLASS)]
+            readonly class Labeled implements ParseProperties {
+                public array $properties;
+
+                public function setProperties(array $ps): void { $this->properties ??= $ps; }
+                public function includePropertiesByDefault(): bool { return true; }
+                public function propertyAttribute(): string { return Label::class; }
+            }
+
+            #[\Attribute(\Attribute::TARGET_PROPERTY | \Attribute::IS_REPEATABLE)]
+            readonly class Label implements SupportsScopes, Excludable {
+                public function __construct(
+                    public string $name = 'None',
+                    public ?string $language = null,
+                    public bool $exclude = false,
+                ) {}
+
+                public function scopes(): array {
+                    return [$this->language];
+                }
+
+                public function exclude(): bool { return $this->exclude; }
+            }
+          </code></pre>
+        <aside class="notes">
+          <ul>
+            <li>~ Symfony Serialization Groups, but for anything</li>
+            <li>Alternate versions of the same attribute to use in different contexts.</li>
+            <li>Labeled is standard property collector</li>
+            <li>Label has scopes, mapped to language in this case. Can be any logic.</li>
+            <li>Scopes are always multi-value.</li>
+            <li>Scoped attribute needs IS_REPEATABLE to tell PHP to allow it. Not the same as multi-value for AU.</li>
+          </ul>
+        </aside>
+      </section>
+      <section>
+        <h2>Scopes</h2>
+          <pre><code class="php font--16" data-trim data-noescape data-line-numbers="1-16|1,16,4,9,13,15,2,6,18-19|1,16,4,9,13,15,3,7,21-22|1,16,4,9,13,15,2,6,12,24-25">
+            class App {
+                #[Label(name: 'Installation')]
+                #[Label(name: 'Instalación', language: 'es')]
+                public string $install;
+
+                #[Label(name: 'Setup')]
+                #[Label(name: 'Configurar', language: 'es')]
+                #[Label(name: 'Einrichten', language: 'de')]
+                public string $setup;
+
+                #[Label(name: 'Einloggen', language: 'de')]
+                #[Label(language: 'fr', exclude: true)]
+                public string $login;
+
+                public string $custom;
+            }
+
+            $labels = $analyzer->analyze(App::class, Labeled::class);
+            // install = "Installation", setup = "Setup", login = "None", custom = "None"
+
+            $labels = $analyzer->analyze(App::class, Labeled::class, scopes: ['es']);
+            // install = "Instalación", setup = "Configurar", login = "None", custom = "None"
+
+            $labels = $analyzer->analyze(App::class, Labeled::class, scopes: ['fr']);
+            // install = "Installation", setup = "Setup", custom = "None"
+          </code></pre>
+        <aside class="notes">
+          <ul>
+            <li>No scope, use unscoped, English versions</li>
+            <li>Spanish, use Spanish instead if available</li>
+            <li>French, use French instead if available (including the exclude)</li>
+          </ul>
+        </aside>
+      </section>
+      <section>
+        <h2>Transitivity</h2>
+          <pre><code class="php font--16" data-trim data-noescape data-line-numbers="|1-9|6-7|20-21|11-18">
+            #[\Attribute(\Attribute::TARGET_PROPERTY)]
+            readonly class Names implements ParseProperties {
+                // ...
+                public function propertyAttribute(): string { return FancyName::class; }
+            }
+            #[\Attribute(\Attribute::TARGET_PROPERTY | \Attribute::TARGET_CLASS)]
+            readonly class FancyName implements TransitiveProperty {
+                public function __construct(public string $name = '') {}
+            }
+
+            class Stuff {
+                protected string $bare;
+                #[FancyName('A happy little integer')]
+                protected int $namedNumber;
+                protected Person $personOne;
+                #[FancyName('Her Majesty Queen Elizabeth II')]
+                protected Person $personTwo;
+            }
+
+            #[FancyName('I am not an object, I am a free man!')]
+            class Person {}
+
+          </code></pre>
+          <div class="fragment">
+            <pre><code class="php font--16" data-trim data-noescape data-line-numbers="">
+            $p = $analyzer->analyze(Stuff::class, Names::class)->properties;
+
+            print $p['bare']->name; // ""
+            print $p['namedNumber']->name; // "A happy little integer"
+            print $p['personOne']->name; // "I am not an object, I am a free man!"
+            print $p['personTwo']->name; // "Her Majesty Queen Elizabeth II"
+            </code></pre>
+          </div>
+        <aside class="notes">
+          <ul>
+            <li>Very unlikely to use this, but needed for Serde</li>
+            <li>"Tell me about this type", in an overridable way</li>
+            <li>FancyName goes on properties OR classes.</li>
+            <li>Used in Serde for type maps defined on class/interface</li>
+          </ul>
+        </aside>
+      </section>
+      <section>
+        <h2><code>Finalizable</code></h2>
+        <pre><code class="php font--16" data-trim data-noescape data-line-numbers="|2-6|1,8-10|1,12-14">
+          class Info implements Finalizable, FromReflectionClass {
+              public readonly string $name;
+
+              public function __construct(?string $name = null) {
+                  if ($name) $this->name = $name;
+              }
+
+              public function fromReflection(\ReflectionClass $r) {
+                  if ($r->getNamespace() == '\\My\\Space') $this->name ??= $r->getShortName();
+              }
+
+              public function finalize() {
+                  $this->name ??= 'Untitled';
+              }
+          }
+        </code></pre>
+        <aside class="notes">
+          <ul>
+            <li>The more things you opt-in to, the more relvant this is.</li>
+          </ul>
+        </aside>
+      </section>
+      <section>
+        <h2>Functions</h2>
+        <pre><code class="php font--16" data-trim data-noescape data-line-numbers>
+          use Crell\AttributeUtils\FuncAnalyzer;
+
+          #[MyFunc]
+          function beep(int $a) {}
+
+          $closure = #[MyClosure] fn(int $a) => $a + 1;
+
+          // For functions...
+          $analyzer = new FuncAnalyzer();
+          $funcDef = $analyzer->analyze('beep', MyFunc::class);
+
+          // For closures
+          $analyzer = new FuncAnalyzer();
+          $funcDef = $analyzer->analyze($closure, MyFunc::class);
+        </code></pre>
+        <ul class="fragment">
+          <li><code>ParseParameters</code>, <code>Finalizable</code>, <code>FromReflectionFunction</code></li>
+        </ul>
+      </section>
+    </section>
+    <section>
+      <section>
+        <h3>ClassAnalyzer overview</h3>
+        <div class="mermaid">
+          <pre>
+            sequenceDiagram
+                actor user as User code
+                participant Analyzer
+                participant RDB as ReflectionDefinitionBuilder
+                participant AttributeParser
+                user->>Analyzer: analyze()
+                activate Analyzer
+                Analyzer->>AttributeParser: construct(scopes)
+                activate AttributeParser
+                Analyzer->>RDB: construct(parser, self)
+                activate RDB
+                Analyzer->>AttributeParser: Get attribute
+                Analyzer->>RDB: Get Properties
+                Analyzer->>RDB: Get Static Properties
+                Analyzer->>RDB: Get Methods
+                Analyzer->>RDB: Get Methods
+                Analyzer->>RDB: Get Static Methods
+                Analyzer->>RDB: Get Enum cases
+                Analyzer->>RDB: Get Constants
+                deactivate AttributeParser
+                deactivate RDB
+                Analyzer-->>user: return
+                deactivate Analyzer
+
+          </pre>
+        </div>
+        <aside class="notes">
+          <ul>
+            <li>Most logic is in internal objects.</li>
+            <li>Internal objects recreated each time, with appropriate context (eg, scopes)</li>
+            <li>All three are fully stateless! 100% immutable services.</li>
+          </ul>
+        </aside>
+      </section>
+      <section>
+        <h2>Cool PHP trick</h2>
+        <h3>Internal execution objects</h3>
+        <pre><code class="php font--16" data-trim data-noescape data-line-numbers="">
+          readonly class PublicFacing {
+              public function __construct(private DepA $depA, private DepB $debB) {}
+
+              public function run(A $paramA, B $paramB) {
+                  $runner = new Executor($this->depA, $this->depB, $paramA, $paramB);
+                  return $runner->run();
+              }
+          }
+
+          readonly class Executor {
+              public function __construct(
+                public DepA $depA, public DepB $debB, private,
+                public A $a, public B $b) {}
+
+            public function run(): Result {
+              $this->foo(); // Can use all the passed dependencies
+              $this->a->bar($this); // Pass all the deps to A, so it can use them.
+            }
+          }
+        </code></pre>
+        <ul>
+          <li class="fragment">Avoid passing values in each method every time</li>
+          <li class="fragment">Fully immutable, so public properties OK!</li>
+          <li class="fragment">Safe to pass <code>$this</code> around dependencies</li>
+          <li class="fragment">No need to DI every separate piece separately!</li>
+        </ul>
+      </section>
+    </section>
+    <section>
+      <section>
+        <h2>AttributeUtils in action</h2>
+      </section>
+      <section>
+        <h2>Example: Serde</h2>
+        <pre><code class="php font--16" data-trim data-noescape data-line-numbers="">
+          #[ClassSettings(renameWith: new Prefix('mail_')]
+          class MailConfig {
+              protected string $host = 'smtp.example.com';
+
+              protected int $port = 25;
+
+              protected string $user = 'me';
+
+              #[Field(renameWith: Case::CAPITALIZE)]
+              protected string $password = 'sssh';
+
+              #[PostLoad]
+              private function validate(): void {
+                  if ($port > 1024) throw new \InvalidArgumentException();
+              }
+          }
+        </code></pre>
+        <aside class="notes">
+          <ul>
+            <li>Serialization library, most robust</li>
+            <li>Include all fields by default</li>
+            <li>Apply auto-renaming to all properties</li>
+            <li>Override renaming on one field</li>
+            <li>Also marks methods</li>
+          </ul>
+        </aside>
+      </section>
+      <section>
+        <h2>Example: Serde</h2>
+        <pre><code class="php font--16" data-trim data-noescape data-line-numbers="">
+          use Crell\Serde\Attributes\StaticTypeMap;
+
+          #[StaticTypeMap(key: 'type', map: [
+              'paper' => Book::class,
+              'ebook' => DigitalBook::class,
+          ])]
+          interface Book {}
+
+          class PaperBook implements Book {}
+          class DigitalBook implements Book {}
+
+          class Sale {
+              protected Book $book;
+              protected float $discountRate;
+          }
+        </code></pre>
+        <aside class="notes">
+          <ul>
+            <li>Attributes on interfaces! AttributeUtils inheritance makes it work</li>
+            <li>Type maps are transitive, so Sale::$book "has" the static map from Book.</li>
+            <li>Type-maps are a sub-attribute, but you don't care.</li>
+          </ul>
+        </aside>
+      </section>
+      <section>
+        <h2>Example: Tukio</h2>
+        <pre><code class="php font--16" data-trim data-noescape data-line-numbers="">
+          class ListenerOne {
+              public function __construct(
+                  private readonly DependencyA $depA,
+              ) {}
+
+              public function __invoke(MyEvent $event): void { ... }
+          }
+
+          #[ListenerBefore(ListenerOne::class)]
+          class ListenerTwo {
+              public function __invoke(MyEvent $event): void { ... }
+          }
+
+          $provider->listenerService(ListenerOne::class);
+          $provider->listenerService(ListenerTwo::class);
+        </code></pre>
+        <aside class="notes">
+          <ul>
+            <li>Attribute marks </li>
+            <li>Uses sub-attributes internally, but you don't see it</li>
+            <li>Can override anything, or accept defaults</li>
+            <li>Refactoring to AttributeUtils saved a lot of code, features for free</li>
+            <li>Put Listener attribute on class or method, will still handle defaults!</li>
+          </ul>
+        </aside>
+      </section>
+      <section>
+        <h2>Example: Tukio</h2>
+        <pre><code class="php font--16" data-trim data-noescape data-line-numbers="">
+          class MyListeners {
+              #[Listener(id: 'a')]
+              public function onA(CollectingEvent $event): void {
+                  $event->add('A');
+              }
+
+              #[ListenerPriority(priority: 5)]
+              public function onB(CollectingEvent $event): void {
+                  $event->add('B');
+              }
+
+              #[ListenerAfter(after: 'a')]
+              public function onD(CollectingEvent $event): void {
+                  $event->add('D');
+              }
+
+              #[ListenerPriority(priority: -5)]
+              public function notNormalName(CollectingEvent $event): void {
+                  $event->add('F');
+              }
+
+              public function ignoredMethodThatDoesNothing(): void {
+                  throw new \Exception('What are you doing here?');
+              }
+          }
+        </code></pre>
+        <aside class="notes">
+          <ul>
+            <li>Before/After/Priority ordering, very simple</li>
+            <li>Can do all the same things via API calls, but... why?</li>
+          </ul>
+        </aside>
+      </section>
+      <section>
+        <h2>Example: Routing (fictional)</h2>
+        <pre><code class="php font--16" data-trim data-noescape data-line-numbers="">
+          #[Routes(path: '/app/v1', perm: 'auth user')]
+          class ProductController {
+              #[Route]
+              public function index() { ... }
+
+              #[Route(path: '/{$id}')]
+              public function get(string $id) { ... }
+
+              #[Route(method: Http::Post, perm: 'create post')]
+              public function post(Product $p) { ... }
+
+              #[Route(path: '/{$id}', method: Http::Delete, perm: 'delete')]
+              public function delete(string $id) { ... }
+          }
+        </code></pre>
+        <aside class="notes">
+          <ul>
+            <li>Hypothetical design</li>
+            <li>Route inherits defaults from Routes</li>
+            <li>You can decide if perms are additive or override</li>
+            <li>All the inheritance and defaults logic is handled by the attributes themselves.</li>
+            <li>At the end, just get a readonly data object.</li>
+          </ul>
+        </aside>
+      </section>
+    </section>
+    <section>
+      Some kind of conclusion
     </section>
 
     <div style="display: none">
